@@ -85,12 +85,22 @@ pca_df <- data.frame(PC1 = pca$x[, 1], PC2 = pca$x[, 2])
 pca_df <- merge(pca_df, meta_data, by = "row.names") %>% 
     tibble::column_to_rownames("Row.names")
 
-ggplot2::ggplot(pca_df, aes(PC1, PC2)) +
+ggplot2::ggplot(data = pca_df, 
+                aes(x = PC1, y = PC2)) +
     ggplot2::geom_point(aes(color = Treatment, size = 5)) + 
     ggplot2::xlab(paste0("PC1 : ", percent_var[1], '%')) +
     ggplot2::ylab(paste0("PC2 : ", percent_var[2], '%')) +
     ggplot2::coord_fixed(ratio = sd_ratio) + 
     ggrepel::geom_text_repel(aes(label = rownames(pca_df)))
+
+#### Different PCA method --> Different result? ####
+# 1. DESeq2::plotPCA(rlog, intgroup = colnames(meta_data), returnData = TRUE)
+# 2. stats::prcomp(t(assay(rlog)), center = FALSE, scale. = FALSE)
+# 3. stats::prcomp(t(assay(rlog)), center = TRUE, scale. = FALSE)
+# 4. stats::prcomp(t(assay(rlog)), center = FALSE, scale. = TRUE)
+# 5. stats::prcomp(t(assay(rlog)), center = TRUE, scale. = TRUE)
+# --> What is difference between DESeq2::plotPCA() and stats::prcomp() ?
+# --> Do we need center = TRUE, scale. = TRUE option in stats::prcomp() ?
 
 
 corr <- stats::cor(rlog)  # cor(t(rlog)) : Gene by Gene Correlation
@@ -102,7 +112,7 @@ ComplexHeatmap::pheatmap(mat = corr,
                          color = rev(RColorBrewer::brewer.pal(11, "RdBu")))
 
 
-# remove outlier sample and repeat above works
+# remove outlier samples and repeat above works
 drops <- c("SPF-Saline-2", "SPF-Saline-3", "SPF-Saline-4", "SPF-Saline-8",
            "SPF-CL-4", "SPF-CL-5", "SPF-CL-6")
 count_data <- count_data[, !(colnames(count_data) %in% drops)]
@@ -148,6 +158,9 @@ EnhancedVolcano::EnhancedVolcano(toptable = lfc_res,
                                  labSize = 4,
                                  axisLabSize = 10)
 
+# manually drawn valcano plot using ggplot2
+
+
 
 # gene by sample heatmap
 ComplexHeatmap::pheatmap(mat = sig_norm_cnt %>% tibble::column_to_rownames(var = "Gene_Symbol"),
@@ -189,8 +202,10 @@ fat_markers <- union(union(brown_markers, beige_markers), white_markers)
 
 ComplexHeatmap::pheatmap(mat = sig_norm_cnt %>%
                              dplyr::filter(Gene_Symbol %in% browning_markers) %>%
-                             tibble::column_to_rownames(var = "Gene_Symbol"),
-                         name = "Normalized Expression",
+                             tibble::column_to_rownames(var = "Gene_Symbol") %>%
+                             as.matrix(),
+                         border_gp = grid::gpar(col = "black", lty = 1, lwd=1),
+                         legend = ComplexHeatmap::Legend(at = c(-2, -1, 0, 1, 2), title_position = "topcenter"),
                          cluster_cols = TRUE,
                          cluster_rows = TRUE,
                          show_colnames = TRUE,
@@ -226,9 +241,18 @@ pheatmap::pheatmap(mat = sig_norm_cnt %>%
 library(biomaRt)
 
 
+
+
+
+
 # 7. Functional Analysis
 # - Barplot / Dotplot
+# Tutorial : https://learn.gencore.bio.nyu.edu/rna-seq-analysis/gene-set-enrichment-analysis/
 library(clusterProfiler)
+library(org.Mm.eg.db)
+
+
+
 
 # Barplot and Dotplot using DAVID result
 up_kegg <- read.table(file = file.path(RDATA, "DAVID_UP_FC25_KEGG.txt"),
@@ -239,15 +263,102 @@ up_kegg <- up_kegg %>%
     dplyr::filter(FDR < 0.05) %>%
     dplyr::select(Term, Count, FDR)
 
-up_kegg <- up_kegg[order(up_kegg$Count, decreasing = TRUE), ]
+# do not decreasingly order --> we want high count term as higher position in y-axis
+# if you decreasingly order, then term with highest count will have lowest position in y-axis
+up_kegg <- up_kegg[order(up_kegg$Count), ]
 up_kegg$Term <- factor(up_kegg$Term, levels = rev(up_kegg$Term))
 
 up_kegg$Term <- sapply(X = up_kegg$Term,
                        FUN = function(x) {strsplit(x, ':')[[1]][2]})
 
-ggplot2::ggplot(up_kegg, aes(Count, Term, fill = -log(FDR)))+
-    ggplot2::geom_bar(stat = "identity") +
+# Barplot
+ggplot2::ggplot(data = up_kegg, 
+                aes(x = Count, y = Term))+
+    ggplot2::theme_bw() +
+    ggplot2::geom_bar(stat = "identity", 
+                      aes(fill = -log(FDR))) +
     ggplot2::scale_fill_gradient(low = "#1E88E5", high = "#E53935")
+
+# Dotplot
+ggplot2::ggplot(data = up_kegg, 
+                aes(x = Count, y = Term)) +
+    ggplot2::geom_point(size = 6, 
+                        aes(color = -log(FDR))) +
+    ggplot2::scale_color_gradient(low = "#1E88E5", high = "#E53935") +
+    ggplot2::theme_bw(base_size = 15)
+
+# Dotplot with highlight on specific term (application)
+ggplot2::ggplot(data = up_kegg, 
+                aes(x = Count, y = Term)) +
+    ggplot2::scale_y_discrete() +  # you must specify that y-axis is discrete (factors) to ggplot 
+    ggplot2::geom_rect(aes(xmin = -Inf, 
+                           xmax = Inf, 
+                           ymin = which(Term == "Thermogenesis") - 0.2, 
+                           ymax = which(Term == "Thermogenesis") + 0.2),
+                       fill = "red",
+                       alpha = 0.03) +  # plot geom_rect() first to make this highlight box as background of main plot
+    ggplot2::geom_point(size = 10, 
+                        aes(color = -log(FDR))) +
+    ggplot2::scale_color_gradient(low = "#1E88E5", high = "#E53935",  # legend color
+                                  name = "-log(FDR)",  # legend title
+                                  labels = c('5', '10', '15'), breaks = c(5, 10, 15)) +  # legend ticks
+    ggplot2::theme_bw(base_size = 20) +  # use base_size to consistently increase text size
+    ggplot2::theme(legend.title = ggplot2::element_text(size = 15),  # legend title size
+                   # remember that levels(up_kegg$Term) and up_kegg$Term are opposite direction (reversed)
+                   # so, c("black", "red", rep("black", 4)) will result not what you want
+                   axis.text.y = ggplot2::element_text(face = c(rep("plain", 4), "bold", "plain"),  # axis label color and thickness
+                                                       color = c(rep("black", 4), "red", "black")),
+                   # margin (gap) betwwen axis and axis-title
+                   axis.title.x = ggplot2::element_text(margin = margin(t = 20,  # top margin
+                                                                        b = 0,  # bottom margin
+                                                                        r = 0,  # right margin
+                                                                        l = 0)),  # left margin
+                   axis.title.y = ggplot2::element_text(margin = margin(t = 0,
+                                                                        b = 0,
+                                                                        r = 30,
+                                                                        l = 0)))
+
+# Dotplot with highlight on neighboring terms
+ggplot2::ggplot(data = up_kegg,
+                aes(x = Count, y = Term)) + 
+    ggplot2::scale_y_discrete() +
+    # Direction between levels(up_kegg$Term) and up_kegg$Term is opposite
+    # Thermogenesis is 2nd term in up_kegg$Term, since up_kegg$Term is decreasingly ordered by counts
+    # Thermogenesis is 5th term in levels(up_kegg$Term)
+    # You should find 
+    ggplot2::geom_rect(aes(xmin = -Inf,
+                           xmax = Inf,
+                           ymin = which(Term == "PPAR signaling pathway") - 0.2,
+                           ymax = which(Term == "Thermogenesis") + 0.2,),
+                       fill = "red",
+                       alpha = 0.03) + 
+    ggplot2::geom_point(size = 10,
+                        aes(color = -log(FDR))) + 
+    ggplot2::scale_color_gradient(low = "#1E88E5", high = "#E53935") +
+    ggplot2::theme_bw()
+
+# Dotplot with highlights on distant terms
+ggplot2::ggplot(data = up_kegg,
+                aes(x = Count, y = Term)) + 
+    ggplot2::scale_y_discrete() +
+    ggplot2::geom_rect(aes(xmin = -Inf,
+                           xmax = Inf,
+                           ymin = which(Term == "Ovarian steroidogenesis") - 0.2,
+                           ymax = which(Term == "Ovarian steroidogenesis") + 0.2),
+                       fill = "red",
+                       alpha = 0.03) + 
+    ggplot2::geom_rect(aes(xmin = -Inf,
+                           xmax = Inf,
+                           ymin = which(Term == "Thermogenesis") - 0.2,
+                           ymax = which(Term == "Thermogenesis") + 0.2),
+                       fill = "red",
+                       alpha = 0.03) + 
+    ggplot2::geom_point(size = 10,
+                        aes(color = -log(FDR))) + 
+    ggplot2::scale_color_gradient(low = "#1E88E5", high = "#E53935") + 
+    ggplot2::theme_bw()
+
+
 
 
 # 8. 
