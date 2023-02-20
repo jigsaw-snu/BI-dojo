@@ -235,23 +235,64 @@ pheatmap::pheatmap(mat = sig_norm_cnt %>%
                          color = rev(RColorBrewer::brewer.pal(11, "RdBu")))
 
 
+# marker gene dot plot
+lfc_res_markers <- sig_lfc_res %>% dplyr::filter(Gene_Symbol %in% fat_markers)
+lfc_res_markers <- lfc_res_markers[order(lfc_res_markers$log2FoldChange), ]
+lfc_res_markers$Gene_Symbol <- factor(lfc_res_markers$Gene_Symbol,
+                                      levels = )
+
+ggplot2::ggplot(data = sig_lfc_res %>%
+                    dplyr::filter(Gene_Symbol %in% fat_markers), 
+                aes(x = log2FoldChange, y = Gene_Symbol)) +
+    ggplot2::scale_y_discrete() +
+    ggplot2::geom_point(size = 10, aes(color = -log(padj))) +
+    ggplot2::scale_color_gradient(low = "#1E88E5", high = "#E53935") + 
+    ggplot2::theme_bw() +
+    guides(guide_legend(title = element_text("test")))
+
 
 
 # 6. Gene ID Conversion
 library(biomaRt)
 
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "mmusculus_gene_ensembl")
 
+bm <- biomaRt::getBM(mart = mart,
+                     filters = "external_gene_name",  # input ID type
+                     attributes = c("external_gene_name", "ensembl_gene_id", "entrezgene_id"),  # output ID type
+                     values = sig_lfc_res$Gene_Symbol)  # input gene list
+
+# change column names
+# same column name with original dataset is needed when merging two datasets
+colnames(bm) <- c("Gene_Symbol", "ENSMUSG", "Entrez")
+
+# - check NULL-mapping
+# you should remove all the NULL-mapped entries
+bm <- subset(bm,
+             !is.na(Gene_Symbol) & trimws(Gene_Symbol) != '' &
+             !is.na(ENSMUSG) & trimws(ENSMUSG) != '' &
+             !is.na(Entrez) & trimws(Entrez) != '')
+
+# merge converted ID with original dataset
+sig_lfc_res_ens <- merge(sig_lfc_res, bm, by = "Gene_Symbol")  # will include duplicates
 
 
 
 
 # 7. Functional Analysis
+# - GO / KEGG / GSEA (HALLMARK_DB) / STRING
 # - Barplot / Dotplot
 # Tutorial : https://learn.gencore.bio.nyu.edu/rna-seq-analysis/gene-set-enrichment-analysis/
+# Tutorial : https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2018/RNASeq2018/html/06_Gene_set_testing.nb.html
+# Tutorial : https://bioinformatics-core-shared-training.github.io/Bulk_RNAseq_Course_Nov22/Bulk_RNAseq_Course_Base/Markdowns/12_Gene_set_testing.html
 library(clusterProfiler)
 library(org.Mm.eg.db)
 
+# Over-representation analysis
 
+
+# Gene Set Enrichment Analysis
 
 
 # Barplot and Dotplot using DAVID result
